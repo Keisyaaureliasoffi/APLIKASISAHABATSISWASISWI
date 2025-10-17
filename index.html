@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sahabat Siswa</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom CSS untuk melengkapi Tailwind */
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; }
+        .app-shell { max-width: 420px; height: 100vh; }
+        .chat-bubble.sent { background-color: #0288D1; color: white; margin-left: auto; border-bottom-right-radius: 5px; }
+        .chat-bubble.received { background-color: #FFFFFF; color: #333; margin-right: auto; border-bottom-left-radius: 5px; }
+        @media (min-width: 768px) {
+            .app-shell { max-width: 800px; height: 90vh; margin: 5vh auto; border-radius: 1.5rem; box-shadow: 0 10px 30px rgba(0,0,0,0.1); overflow: hidden; }
+        }
+    </style>
+</head>
+<body class="bg-gray-100 flex items-center justify-center">
+
+    <div id="app" class="app-shell w-full bg-slate-50 flex flex-col border-l border-r border-gray-200">
+        <!-- Konten aplikasi akan dirender di sini oleh JavaScript -->
+    </div>
+
+    <script type="module">
+        // --- PENGATURAN PENYIMPANAN LOKAL (LOCAL STORAGE) ---
+
+        const getLocalStorage = (key, defaultValue) => {
+            try {
+                const storedValue = localStorage.getItem(key);
+                return storedValue ? JSON.parse(storedValue) : defaultValue;
+            } catch (error) {
+                console.error("Error reading from localStorage", error);
+                return defaultValue;
+            }
+        };
+
+        const setLocalStorage = (key, value) => {
+            try {
+                localStorage.setItem(key, JSON.stringify(value));
+            } catch (error) {
+                console.error("Error writing to localStorage", error);
+            }
+        };
+        
+        const initializeData = () => {
+            const users = getLocalStorage('users', []);
+            const guruExists = users.some(user => user.role === 'guru' && user.name === 'Teti Kodariah, S.Psi');
+
+            if (!guruExists) {
+                const initialGurus = [
+                    { uid: 'guru_1', role: 'guru', name: 'Teti Kodariah, S.Psi', specialization: 'Spesialis Karir & Akademik' },
+                    { uid: 'guru_2', role: 'guru', name: 'Ratna Jamilah, S.Pd', specialization: 'Spesialis Kesejahteraan Mental' },
+                ];
+                 // Hanya tambahkan guru jika belum ada, jangan timpa data user yang sudah ada
+                const existingUsers = getLocalStorage('users', []);
+                const newUsers = [...existingUsers];
+                initialGurus.forEach(guru => {
+                    if (!newUsers.find(u => u.name === guru.name)) {
+                        newUsers.push(guru);
+                    }
+                });
+                setLocalStorage('users', newUsers);
+            }
+        };
+
+        initializeData();
+        
+        const appContainer = document.getElementById('app');
+        let currentUser = JSON.parse(sessionStorage.getItem('currentUser')) || null;
+        let selectedCounselor = null;
+        let selectedChatPartner = null;
+        let currentScreen = '';
+
+        // --- TEMPLATES (HTML GENERATORS) ---
+
+        const renderEntryScreen = () => `
+            <div class="flex-1 p-5 bg-cyan-50 flex flex-col justify-center">
+                <div id="entry-box" class="bg-white p-6 rounded-2xl shadow-lg w-full">
+                    <h1 class="text-3xl font-bold text-cyan-800 text-center">SAHABAT SISWA</h1>
+                    <p class="text-slate-600 text-center mb-6">SMA Negeri 1 Dramaga</p>
+                    <div class="bg-slate-100 rounded-lg p-1 flex mb-5">
+                        <button id="role-siswa" class="role-button flex-1 p-2 rounded-md text-center font-semibold bg-white text-cyan-600 shadow">Pengguna (Pelajar)</button>
+                        <button id="role-guru" class="role-button flex-1 p-2 rounded-md text-center font-semibold text-slate-500">Admin (Guru BK)</button>
+                    </div>
+                    <label class="font-semibold text-sm text-gray-700">Nama Lengkap</label>
+                    <input id="name-input" type="text" placeholder="Masukkan nama Anda" class="input-field"/>
+                    <div id="siswa-fields">
+                        <label class="font-semibold text-sm text-gray-700">Kelas</label>
+                        <input id="class-input" type="text" placeholder="Contoh: XII A" class="input-field"/>
+                    </div>
+                    <div id="guru-fields" class="hidden">
+                        <label class="font-semibold text-sm text-gray-700">Spesialisasi</label>
+                        <input id="specialization-input" type="text" placeholder="Contoh: Spesialis Karir" class="input-field"/>
+                    </div>
+                    <label class="font-semibold text-sm text-gray-700">Password</label>
+                    <input id="password-input" type="password" placeholder="Buat password untuk sesi ini" class="input-field"/>
+                    <p id="error-text" class="text-red-500 text-center text-sm my-2"></p>
+                    <button id="enter-btn" class="w-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-3 px-4 rounded-lg">Masuk</button>
+                </div>
+            </div>
+        `;
+
+        const renderBottomNav = (role) => {
+            const siswaItems = `
+                <button data-screen="SiswaHome" class="nav-item"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg><span class="nav-text">Beranda</span></button>
+                <button data-screen="SiswaAppointments" class="nav-item"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg><span class="nav-text">Janji Temu</span></button>
+                <button data-screen="ChatList" class="nav-item"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><span class="nav-text">Pesan</span></button>
+                <button data-screen="Profile" class="nav-item"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg><span class="nav-text">Profil</span></button>
+            `;
+            const guruItems = `
+                <button data-screen="GuruHome" class="nav-item"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg><span class="nav-text">Beranda</span></button>
+                <button data-screen="GuruSchedule" class="nav-item"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg><span class="nav-text">Jadwal</span></button>
+                <button data-screen="ChatList" class="nav-item"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><span class="nav-text">Pesan</span></button>
+                <button data-screen="SiswaList" class="nav-item"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg><span class="nav-text">Siswa</span></button>
+                <button data-screen="Profile" class="nav-item"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg><span class="nav-text">Profil</span></button>
+            `;
+            return `<nav class="h-[70px] bg-white border-t border-gray-200 flex justify-around items-center">${role === 'siswa' ? siswaItems : guruItems}</nav>`;
+        };
+
+        const renderScreen = (screenName) => {
+            currentScreen = screenName;
+            let content = '';
+            
+            switch(screenName) {
+                case 'SiswaHome':
+                    content = `
+                        <div class="flex-1 p-5 overflow-y-auto">
+                            <h1 class="text-3xl font-bold text-gray-800">Beranda</h1>
+                            <p class="text-2xl text-gray-600 mt-4">Selamat datang, <br/><span class="font-bold">${currentUser.name}</span></p>
+                            <div class="card mt-6">
+                                <h2 class="card-title">Info Terkini</h2>
+                                <p class="card-content">Jaga kesehatan mentalmu. Jika butuh teman bicara, kami siap membantu.</p>
+                            </div>
+                            <h2 class="text-xl font-bold text-gray-800 mt-6 mb-4">Akses Cepat</h2>
+                            <div class="grid grid-cols-2 gap-4">
+                                <button class="quick-access-card" data-screen="SiswaAppointments"><svg class="mx-auto" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#0288D1"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg><span class="quick-access-text">Buat Janji</span></button>
+                                <button class="quick-access-card" data-screen="ChatList"><svg class="mx-auto" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#0288D1"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><span class="quick-access-text">Pesan</span></button>
+                                <button class="quick-access-card" data-screen="Profile"><svg class="mx-auto" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#0288D1"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg><span class="quick-access-text">Profil</span></button>
+                            </div>
+                        </div>
+                    `;
+                    break;
+                case 'GuruHome':
+                     content = `
+                        <div class="flex-1 p-5 overflow-y-auto">
+                            <h1 class="text-3xl font-bold text-gray-800">Dashboard</h1>
+                            <p class="text-2xl text-gray-600 mt-4">Selamat bertugas, <br/><span class="font-bold">${currentUser.name}</span></p>
+                             <div class="card mt-6">
+                                <h2 class="card-title">Pemberitahuan</h2>
+                                <p class="card-content">Cek jadwal dan pesan baru dari siswa.</p>
+                            </div>
+                            <h2 class="text-xl font-bold text-gray-800 mt-6 mb-4">Akses Cepat</h2>
+                            <div class="grid grid-cols-2 gap-4">
+                                <button class="quick-access-card" data-screen="GuruSchedule"><svg class="mx-auto" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#0288D1"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg><span class="quick-access-text">Jadwal</span></button>
+                                <button class="quick-access-card" data-screen="ChatList"><svg class="mx-auto" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#0288D1"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><span class="quick-access-text">Pesan</span></button>
+                                <button class="quick-access-card" data-screen="SiswaList"><svg class="mx-auto" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#0288D1"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg><span class="quick-access-text">Siswa</span></button>
+                                <button class="quick-access-card" data-screen="Profile"><svg class="mx-auto" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#0288D1"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg><span class="quick-access-text">Profil</span></button>
+                            </div>
+                        </div>
+                    `;
+                    break;
+                case 'Profile':
+                    content = `
+                        <div class="flex-1 p-5 overflow-y-auto text-center">
+                            <h1 class="text-3xl font-bold text-gray-800 mb-6">Profil</h1>
+                            <img src="https://placehold.co/120x120/E0F7FA/0288D1?text=${currentUser.name.charAt(0)}" class="mx-auto rounded-full mb-4"/>
+                            <h2 class="text-2xl font-bold">${currentUser.name}</h2>
+                            <p class="text-gray-600">${currentUser.role === 'siswa' ? `Siswa Kelas ${currentUser.class}` : currentUser.specialization}</p>
+                            <button id="logout-btn" class="mt-8 w-full max-w-sm mx-auto bg-red-500 hover:bg-red-600 text-white font-bold py-3 px-4 rounded-lg">Keluar</button>
+                        </div>
+                    `;
+                    break;
+                case 'SiswaAppointments': {
+                    const counselors = getLocalStorage('users', []).filter(u => u.role === 'guru');
+                    const counselorsList = counselors.map(guru => `
+                        <div class="card flex items-center p-4">
+                            <img src="https://placehold.co/50x50/E0F7FA/0288D1?text=${guru.name.charAt(0)}" class="rounded-full"/>
+                            <div class="flex-1 ml-4">
+                                <h2 class="card-title">${guru.name}</h2>
+                                <p class="card-content">${guru.specialization}</p>
+                            </div>
+                            <button class="button-secondary" data-screen="AppointmentDetail" data-counselor='${JSON.stringify(guru)}'>Pilih</button>
+                        </div>
+                    `).join('');
+                     content = `<div class="flex-1 p-5 flex flex-col"><h1 class="text-3xl font-bold text-gray-800 mb-4">Pilih Guru BK</h1><div class="overflow-y-auto">${counselorsList}</div></div>`;
+                    break;
+                }
+                case 'AppointmentDetail': {
+                     content = `
+                        <div class="flex-1 p-5 flex flex-col">
+                           <button class="back-button" data-screen="SiswaAppointments"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></svg>Buat Janji Temu</button>
+                            <div class="overflow-y-auto">
+                                <div class="card text-center">
+                                    <img src="https://placehold.co/120x120/E0F7FA/0288D1?text=${selectedCounselor.name.charAt(0)}" class="mx-auto rounded-full mb-4"/>
+                                    <h2 class="text-2xl font-bold">${selectedCounselor.name}</h2>
+                                    <p class="text-gray-600">${selectedCounselor.specialization}</p>
+                                </div>
+                                <label class="input-label">Pilih Tanggal</label>
+                                <input id="date-input" type="date" class="input-field"/>
+                                <label class="input-label">Pilih Waktu</label>
+                                <input id="time-input" type="time" class="input-field"/>
+                                <button id="book-btn" class="w-full bg-cyan-600 text-white font-bold py-3 rounded-lg">Konfirmasi Janji Temu</button>
+                            </div>
+                        </div>`;
+                    break;
+                }
+                 case 'AppointmentSuccess':
+                    content = `<div class="flex-1 flex flex-col justify-center items-center text-center p-5"><svg class="mx-auto" width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="#4CAF50"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><h1 class="text-3xl font-bold text-cyan-800 mt-4">Janji Temu Dibuat!</h1><p class="text-slate-600 mt-2">Permintaan Anda telah dikirim.</p><button class="button-primary mt-6" data-screen="SiswaHome">Kembali ke Beranda</button></div>`;
+                    break;
+                case 'ChatList': {
+                    const allUsers = getLocalStorage('users', []);
+                    const partners = currentUser.role === 'siswa' ? allUsers.filter(u => u.role === 'guru') : allUsers.filter(u => u.role === 'siswa');
+                    const partnersList = partners.map(p => `
+                        <button class="card flex items-center p-4 w-full text-left" data-screen="ChatDetail" data-partner='${JSON.stringify(p)}'>
+                            <img src="https://placehold.co/50x50/E0F7FA/0288D1?text=${p.name.charAt(0)}" class="rounded-full"/>
+                            <div class="flex-1 ml-4">
+                                <h2 class="card-title">${p.name}</h2>
+                                <p class="card-content">Klik untuk memulai percakapan...</p>
+                            </div>
+                        </button>
+                    `).join('');
+                    content = `<div class="flex-1 p-5 flex flex-col"><h1 class="text-3xl font-bold text-gray-800 mb-4">Pesan</h1><div class="overflow-y-auto">${partnersList}</div></div>`;
+                    break;
+                }
+                case 'ChatDetail': {
+                     const chatId = currentUser.uid > selectedChatPartner.uid ? `${currentUser.uid}_${selectedChatPartner.uid}` : `${selectedChatPartner.uid}_${currentUser.uid}`;
+                     const messages = getLocalStorage(`chat_${chatId}`, []);
+                     const messagesHtml = messages.map(msg => `<div class="chat-bubble ${msg.sender_uid === currentUser.uid ? 'sent' : 'received'}">${msg.text}</div>`).join('');
+
+                     content = `
+                        <div class="flex-1 flex flex-col" style="padding-bottom: 0;">
+                            <div class="p-5"><button class="back-button" data-screen="ChatList"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></svg>${selectedChatPartner.name}</button></div>
+                            <div id="chat-area" class="flex-1 overflow-y-auto p-5">${messagesHtml}</div>
+                            <div class="p-2 bg-slate-50 border-t flex items-center">
+                                <input id="msg-input" type="text" placeholder="Ketik pesan..." class="input-field flex-1"/>
+                                <button id="send-btn" class="ml-2 w-12 h-12 bg-cyan-600 rounded-full flex items-center justify-center">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
+                                </button>
+                            </div>
+                        </div>`;
+                    break;
+                }
+                 case 'GuruSchedule': {
+                    const appointments = getLocalStorage('appointments', []).filter(a => a.counselor_uid === currentUser.uid).sort((a,b) => new Date(a.date) - new Date(b.date));
+                    const appointmentsList = appointments.length > 0 ? appointments.map(app => `<div class="card"><h2 class="card-title">${app.date} - ${app.time}</h2><p class="card-content">Dengan: ${app.student_name}</p></div>`).join('') : '<p>Tidak ada janji temu.</p>';
+                    content = `<div class="flex-1 p-5 flex flex-col"><button class="back-button" data-screen="GuruHome"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></svg>Jadwal Anda</button><div class="overflow-y-auto">${appointmentsList}</div></div>`;
+                    break;
+                }
+                 case 'SiswaList': {
+                    const students = getLocalStorage('users', []).filter(u => u.role === 'siswa');
+                    const studentsList = students.length > 0 ? students.map(siswa => `<button class="card flex items-center p-4 w-full text-left" data-screen="ChatDetail" data-partner='${JSON.stringify(siswa)}'><img src="https://placehold.co/50x50/E0F7FA/0288D1?text=${siswa.name.charAt(0)}" class="rounded-full"/><div class="flex-1 ml-4"><h2 class="card-title">${siswa.name}</h2><p class="card-content">${siswa.class}</p></div></button>`).join('') : '<p>Belum ada siswa.</p>';
+                    content = `<div class="flex-1 p-5 flex flex-col"><button class="back-button" data-screen="GuruHome"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></svg>Daftar Siswa</button><div class="overflow-y-auto">${studentsList}</div></div>`;
+                    break;
+                }
+                default:
+                    content = renderEntryScreen();
+            }
+            
+            const bottomNav = currentUser ? renderBottomNav(currentUser.role) : '';
+            appContainer.innerHTML = content + bottomNav;
+            
+            if (currentUser) {
+                document.querySelectorAll('.nav-item').forEach(item => {
+                    if (item.dataset.screen === screenName || (screenName.startsWith('Siswa') && item.dataset.screen === 'SiswaHome') || (screenName.startsWith('Guru') && item.dataset.screen === 'GuruHome')) {
+                        item.classList.add('active');
+                    } else {
+                        item.classList.remove('active');
+                    }
+                });
+            }
+        };
+
+        // --- EVENT HANDLERS ---
+
+        const handleEnter = () => {
+            const role = document.querySelector('.role-button.bg-white').id.split('-')[1];
+            const name = document.getElementById('name-input').value;
+            const className = document.getElementById('class-input').value;
+            const specialization = document.getElementById('specialization-input').value;
+
+            const users = getLocalStorage('users', []);
+            let userToLogin;
+            
+            if (role === 'guru') {
+                userToLogin = users.find(u => u.name.toLowerCase() === name.toLowerCase() && u.role === 'guru');
+                if (!userToLogin) {
+                    userToLogin = { uid: `user_${Date.now()}`, role, name, specialization };
+                    setLocalStorage('users', [...users, userToLogin]);
+                }
+            } else {
+                userToLogin = { uid: `user_${Date.now()}`, role, name, class: className };
+                setLocalStorage('users', [...users, userToLogin]);
+            }
+            
+            currentUser = userToLogin;
+            sessionStorage.setItem('currentUser', JSON.stringify(currentUser));
+            renderScreen(currentUser.role === 'siswa' ? 'SiswaHome' : 'GuruHome');
+        };
+        
+        const handleLogout = () => {
+            sessionStorage.removeItem('currentUser');
+            currentUser = null;
+            renderScreen('Entry');
+        };
+
+        const handleBookAppointment = () => {
+            const date = document.getElementById('date-input').value;
+            const time = document.getElementById('time-input').value;
+            if (!date || !time) { alert("Pilih tanggal dan waktu."); return; }
+            const appointments = getLocalStorage('appointments', []);
+            const newAppointment = { id: `apt_${Date.now()}`, student_uid: currentUser.uid, student_name: currentUser.name, counselor_uid: selectedCounselor.uid, counselor_name: selectedCounselor.name, date, time, status: 'pending' };
+            setLocalStorage('appointments', [...appointments, newAppointment]);
+            renderScreen('AppointmentSuccess');
+        };
+        
+        const handleSendMessage = () => {
+            const msgInput = document.getElementById('msg-input');
+            const text = msgInput.value;
+            if (text.trim()) {
+                const chatId = currentUser.uid > selectedChatPartner.uid ? `${currentUser.uid}_${selectedChatPartner.uid}` : `${selectedChatPartner.uid}_${currentUser.uid}`;
+                const messages = getLocalStorage(`chat_${chatId}`, []);
+                const newMsg = { sender_uid: currentUser.uid, text };
+                setLocalStorage(`chat_${chatId}`, [...messages, newMsg]);
+
+                const chatArea = document.getElementById('chat-area');
+                const bubble = document.createElement('div');
+                bubble.textContent = newMsg.text;
+                bubble.className = `chat-bubble sent`;
+                chatArea.appendChild(bubble);
+                chatArea.scrollTop = chatArea.scrollHeight;
+                msgInput.value = '';
+            }
+        };
+
+        // --- GLOBAL EVENT LISTENER ---
+        appContainer.addEventListener('click', (e) => {
+            const target = e.target.closest('button');
+            if (!target) return;
+
+            if (target.dataset.screen) {
+                if (target.dataset.counselor) selectedCounselor = JSON.parse(target.dataset.counselor);
+                if (target.dataset.partner) selectedChatPartner = JSON.parse(target.dataset.partner);
+                renderScreen(target.dataset.screen);
+                return;
+            }
+            
+            if (target.id === 'enter-btn') handleEnter();
+            if (target.id === 'logout-btn') handleLogout();
+            if (target.id === 'book-btn') handleBookAppointment();
+            if (target.id === 'send-btn') handleSendMessage();
+            
+            if (target.classList.contains('role-button')) {
+                document.querySelectorAll('.role-button').forEach(btn => { btn.classList.remove('bg-white', 'text-cyan-600', 'shadow'); btn.classList.add('text-slate-500'); });
+                target.classList.add('bg-white', 'text-cyan-600', 'shadow');
+                const isSiswa = target.id === 'role-siswa';
+                document.getElementById('siswa-fields').style.display = isSiswa ? 'block' : 'none';
+                document.getElementById('guru-fields').style.display = isSiswa ? 'none' : 'block';
+            }
+        });
+        
+         appContainer.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter' && e.target.id === 'msg-input') handleSendMessage();
+        });
+
+        // --- INITIAL RENDER ---
+        if (currentUser) {
+            renderScreen(currentUser.role === 'siswa' ? 'SiswaHome' : 'GuruHome');
+        } else {
+            renderScreen('Entry');
+        }
+    </script>
+    <style>
+        .input-field { @apply w-full h-12 border border-gray-300 rounded-lg px-4 mb-4 bg-slate-100; }
+        .card { @apply bg-white p-5 rounded-xl shadow-sm mb-4 w-full; }
+        .card-title { @apply font-bold text-gray-800; }
+        .card-content { @apply text-sm text-gray-600 mt-1; }
+        .button-secondary { @apply bg-cyan-50 text-cyan-600 font-bold py-2 px-4 rounded-full; }
+        .button-primary { @apply w-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-3 px-4 rounded-lg; }
+        .back-button { @apply flex items-center text-xl font-bold text-gray-800 mb-4; }
+        .quick-access-card { @apply bg-white rounded-xl p-4 text-center shadow-sm; }
+        .quick-access-text { @apply mt-2 font-semibold text-gray-700; }
+        .nav-item { @apply flex flex-col items-center gap-1 text-gray-500 stroke-gray-500; }
+        .nav-item.active { @apply text-cyan-600 stroke-cyan-600; }
+        .nav-text { @apply text-xs; }
+        .profileImage { @apply w-32 h-32 rounded-full; }
+        .profileImageSmall { @apply w-12 h-12 rounded-full; }
+        .list-item { @apply flex items-center p-4 w-full; }
+        .input-label { @apply font-semibold text-sm text-gray-700; }
+    </style>
+</body>
+</html>
+
